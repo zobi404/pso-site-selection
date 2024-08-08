@@ -1,18 +1,22 @@
 let map;
 let selectedRegionBoundary;
-let psoMarkers = [];
-const provinceInput = document.getElementById('province');
-const divisionInput = document.getElementById('division');
-const districtInput = document.getElementById('district');
-const searchButton = document.getElementById('search-button');
+let psoCircles = [];
+let competitorCircles = [];
+let focusedAreas = [];
+const DISTANCE_THRESHOLD = 3000; // Distance in meters to consider for highlighting (10 km)
+const AREA_RADIUS = 1000; // Radius in meters for checking nearby schools and government institutions
 
 function initMap() {
     map = new google.maps.Map(document.getElementById("map"), {
-        center: { lat: 24.8607, lng: 67.0011 }, // Center of Sindh
+        center: { lat: 24.8607, lng: 67.0011 },
         zoom: 7,
     });
 
-    // Initialize event listeners for form inputs
+    const provinceInput = document.getElementById('province');
+    const divisionInput = document.getElementById('division');
+    const districtInput = document.getElementById('district');
+    const searchButton = document.getElementById('search-button');
+
     provinceInput.addEventListener('change', updateDivisions);
     divisionInput.addEventListener('change', updateDistricts);
     districtInput.addEventListener('change', enableSearchButton);
@@ -34,6 +38,7 @@ function populateDivisions() {
         'Thatta'
     ];
 
+    const divisionInput = document.getElementById('division');
     divisionInput.innerHTML = '<option value="">Select Division</option>';
     divisions.forEach(division => {
         const option = document.createElement('option');
@@ -45,6 +50,11 @@ function populateDivisions() {
 }
 
 function updateDivisions() {
+    const provinceInput = document.getElementById('province');
+    const divisionInput = document.getElementById('division');
+    const districtInput = document.getElementById('district');
+    const searchButton = document.getElementById('search-button');
+
     const province = provinceInput.value;
     if (province === 'Sindh') {
         populateDivisions();
@@ -55,6 +65,10 @@ function updateDivisions() {
 }
 
 function updateDistricts() {
+    const divisionInput = document.getElementById('division');
+    const districtInput = document.getElementById('district');
+    const searchButton = document.getElementById('search-button');
+
     const division = divisionInput.value;
     districtInput.innerHTML = '<option value="">Select District</option>';
     searchButton.disabled = true;
@@ -88,335 +102,290 @@ function getDistricts(division) {
 }
 
 function enableSearchButton() {
-    if (provinceInput.value && divisionInput.value && districtInput.value) {
-        searchButton.disabled = false;
-    } else {
-        searchButton.disabled = true;
-    }
+    const districtInput = document.getElementById('district');
+    const searchButton = document.getElementById('search-button');
+    searchButton.disabled = !districtInput.value;
 }
 
 function showRegion(event) {
     event.preventDefault();
+    const province = document.getElementById('province').value;
+    const division = document.getElementById('division').value;
+    const district = document.getElementById('district').value;
 
-    const province = provinceInput.value;
-    const division = divisionInput.value;
-    const district = districtInput.value;
-
-    if (!province || !division || !district) {
-        alert('Please select province, division, and district.');
-        return;
+    if (province && division && district) {
+        // Remove any previous boundaries and markers
+        clearPreviousMarkers();
+        
+        // Show selected region boundary and CNG stations
+        displayRegionBoundary(district);
     }
+}
 
-    // Fetch region boundaries and display on the map
-    const regionCoords = getRegionCoordinates(division, district);
+function displayRegionBoundary(district) {
+    const districtBoundaries = {
+        'Karachi Central': { north: 24.930, south: 24.870, east: 67.100, west: 67.030 },
+        'Karachi East': { north: 24.930, south: 24.870, east: 67.140, west: 67.070 },
+        'Karachi South': { north: 24.860, south: 24.790, east: 67.050, west: 67.000 },
+        'Karachi West': { north: 24.930, south: 24.870, east: 67.020, west: 66.950 },
+        'Korangi': { north: 24.860, south: 24.800, east: 67.150, west: 67.070 },
+        'Malir': { north: 24.940, south: 24.860, east: 67.230, west: 67.140 },
+        'Hyderabad District': { north: 25.440, south: 25.320, east: 68.440, west: 68.310 },
+        'Tando Allahyar': { north: 25.480, south: 25.380, east: 68.740, west: 68.610 },
+        'Tando Muhammad Khan': { north: 25.350, south: 25.240, east: 68.630, west: 68.480 },
+        'Sukkur District': { north: 27.760, south: 27.680, east: 68.940, west: 68.820 },
+        'Ghotki': { north: 28.150, south: 28.050, east: 69.350, west: 69.200 },
+        'Kashmore': { north: 28.450, south: 28.340, east: 69.570, west: 69.420 },
+        'Khairpur': { north: 27.530, south: 27.420, east: 68.760, west: 68.610 },
+        'Larkana District': { north: 27.640, south: 27.540, east: 68.220, west: 68.080 },
+        'Kambar': { north: 27.590, south: 27.470, east: 68.010, west: 67.870 },
+        'Shahdadkot': { north: 27.960, south: 27.850, east: 67.990, west: 67.820 },
+        'Mirpurkhas District': { north: 25.560, south: 25.460, east: 69.050, west: 68.880 },
+        'Umerkot': { north: 25.420, south: 25.320, east: 69.330, west: 69.170 },
+        'Sanghar': { north: 26.040, south: 25.930, east: 69.060, west: 68.920 },
+        'Thatta District': { north: 24.800, south: 24.700, east: 67.950, west: 67.780 }
+    };
 
+    const boundary = districtBoundaries[district];
+    if (boundary) {
+        const districtBoundary = new google.maps.LatLngBounds(
+            new google.maps.LatLng(boundary.south, boundary.west),
+            new google.maps.LatLng(boundary.north, boundary.east)
+        );
+
+        map.fitBounds(districtBoundary);
+
+        // Define the boundaries of the district using a Rectangle
+        selectedRegionBoundary = new google.maps.Rectangle({
+            bounds: districtBoundary,
+            editable: false,
+            draggable: false,
+            map: map,
+            strokeColor: '#FF0000',
+            strokeOpacity: 0.8,
+            strokeWeight: 2,
+            fillColor: '#FF0000',
+            fillOpacity: 0.1
+        });
+
+        // Call the function to add CNG station markers
+        showCngStations(districtBoundary);
+    } else {
+        alert('Boundary not defined for the selected district.');
+    }
+}
+
+function showCngStations(districtBoundary) {
+    clearPreviousMarkers();
+
+    const service = new google.maps.places.PlacesService(map);
+
+    const request = {
+        bounds: districtBoundary,
+        type: ['gas_station']
+    };
+
+    service.nearbySearch(request, function(results, status) {
+        if (status === google.maps.places.PlacesServiceStatus.OK) {
+            let bounds = new google.maps.LatLngBounds();
+            let psoPumps = []; // Array to store PSO pumps
+
+            results.forEach(place => {
+                if (districtBoundary.contains(place.geometry.location)) {
+                    const isPsoStation = place.name.toLowerCase().includes('pso');
+                    const color = isPsoStation ? '#0000FF' : '#FF0000';
+
+                    const circle = new google.maps.Circle({
+                        strokeColor: color,
+                        strokeOpacity: 0.8,
+                        strokeWeight: 2,
+                        fillColor: color,
+                        fillOpacity: 0.35,
+                        map,
+                        center: place.geometry.location,
+                        radius: 300, // Circle radius in meters
+                    });
+
+                    if (isPsoStation) {
+                        psoCircles.push(circle);
+                        psoPumps.push(place.geometry.location); // Add PSO pump to array
+                    } else {
+                        competitorCircles.push(circle);
+                    }
+
+                    const infoWindow = new google.maps.InfoWindow({
+                        content: `<div class="info-content">
+                                    <strong>${place.name}</strong>
+                                    <p>${place.vicinity}</p>
+                                    <p>${place.types.join(', ')}</p>
+                                  </div>`
+                    });
+
+                    google.maps.event.addListener(circle, 'mouseover', function() {
+                        infoWindow.setPosition(place.geometry.location);
+                        infoWindow.open(map, circle);
+                    });
+
+                    google.maps.event.addListener(circle, 'mouseout', function() {
+                        infoWindow.close();
+                    });
+
+                    // Extend bounds to include this marker
+                    bounds.extend(place.geometry.location);
+                }
+            });
+
+            // Create a boundary around the markers
+            if (bounds.getNorthEast().lat() !== bounds.getSouthWest().lat() &&
+                bounds.getNorthEast().lng() !== bounds.getSouthWest().lng()) {
+                
+                // Fit the map to the bounds
+                map.fitBounds(bounds);
+
+                // Create a rectangle around the bounds
+                selectedRegionBoundary = new google.maps.Rectangle({
+                    bounds: bounds,
+                    editable: false,
+                    draggable: false,
+                    map: map,
+                    strokeColor: '#FF0000',
+                    strokeOpacity: 0.8,
+                    strokeWeight: 2,
+                    fillColor: '#FF0000',
+                    fillOpacity: 0.1
+                });
+            }
+
+            // Call the function to calculate and highlight focused areas
+            calculateFocusedAreas(psoPumps, districtBoundary);
+        }
+    });
+}
+
+function calculateFocusedAreas(psoPumps, districtBoundary) {
+    clearFocusedAreas();
+
+    psoPumps.forEach((psoPump, index) => {
+        for (let i = index + 1; i < psoPumps.length; i++) {
+            const distance = google.maps.geometry.spherical.computeDistanceBetween(
+                psoPump,
+                psoPumps[i]
+            );
+
+            if (distance > DISTANCE_THRESHOLD) {
+                const midLat = (psoPump.lat() + psoPumps[i].lat()) / 2;
+                const midLng = (psoPump.lng() + psoPumps[i].lng()) / 2;
+                
+                const focusedArea = new google.maps.Circle({
+                    center: { lat: midLat, lng: midLng },
+                    radius: AREA_RADIUS, // Radius of the focused area
+                    fillColor: '#00FF00',
+                    fillOpacity: 0.6,
+                    strokeColor: '#FFFFFF',
+                    strokeOpacity: 0.8,
+                    strokeWeight: 2,
+                    map: map
+                });
+
+                google.maps.event.addListener(focusedArea, 'mouseover', function() {
+                    const infoWindow = new google.maps.InfoWindow({
+                        content: 'Focused Area'
+                    });
+                    infoWindow.open(map, focusedArea);
+                });
+
+                google.maps.event.addListener(focusedArea, 'mouseout', function() {
+                    infoWindow.close();
+                });
+
+                focusedAreas.push(focusedArea);
+            }
+        }
+    });
+
+    highlightNearbySchoolsAndInstitutions(districtBoundary);
+}
+
+function highlightNearbySchoolsAndInstitutions(districtBoundary) {
+    const service = new google.maps.places.PlacesService(map);
+
+    const schoolRequest = {
+        bounds: districtBoundary,
+        type: ['school']
+    };
+
+    const institutionRequest = {
+        bounds: districtBoundary,
+        type: ['hospital'] // Could be changed to more specific types if needed
+    };
+
+    const checkArea = (results, type) => {
+        results.forEach(place => {
+            if (districtBoundary.contains(place.geometry.location)) {
+                const isWithinFocusedArea = focusedAreas.some(focusedArea => {
+                    return google.maps.geometry.spherical.computeDistanceBetween(
+                        place.geometry.location,
+                        focusedArea.getCenter()
+                    ) <= AREA_RADIUS;
+                });
+
+                if (isWithinFocusedArea) {
+                    const greenCircle = new google.maps.Circle({
+                        center: place.geometry.location,
+                        radius: AREA_RADIUS,
+                        fillColor: '#00FF00',
+                        fillOpacity: 0.6,
+                        strokeColor: '#FFFFFF',
+                        strokeOpacity: 0.8,
+                        strokeWeight: 2,
+                        map: map
+                    });
+
+                    const infoWindow = new google.maps.InfoWindow({
+                        content: `<div class="info-content">
+                                    <strong>${place.name}</strong>
+                                    <p>${place.vicinity}</p>
+                                  </div>`
+                    });
+
+                    google.maps.event.addListener(greenCircle, 'mouseover', function() {
+                        infoWindow.setPosition(place.geometry.location);
+                        infoWindow.open(map, greenCircle);
+                    });
+
+                    google.maps.event.addListener(greenCircle, 'mouseout', function() {
+                        infoWindow.close();
+                    });
+                }
+            }
+        });
+    };
+
+    service.nearbySearch(schoolRequest, (results, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK) {
+            checkArea(results, 'school');
+        }
+    });
+
+    service.nearbySearch(institutionRequest, (results, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK) {
+            checkArea(results, 'institution');
+        }
+    });
+}
+
+function clearPreviousMarkers() {
     if (selectedRegionBoundary) {
         selectedRegionBoundary.setMap(null);
     }
 
-    selectedRegionBoundary = new google.maps.Polygon({
-        paths: regionCoords.boundary,
-        strokeColor: "#0000FF",
-        strokeOpacity: 0.8,
-        strokeWeight: 2,
-        fillColor: "#0000FF",
-        fillOpacity: 0.1,
-    });
-
-    selectedRegionBoundary.setMap(map);
-
-    const bounds = new google.maps.LatLngBounds();
-    regionCoords.boundary.forEach(coord => bounds.extend(coord));
-    map.fitBounds(bounds);
-
-    // Highlight all PSO stations within the region
-    highlightPSOStations(regionCoords.boundary);
+    psoCircles.forEach(circle => circle.setMap(null));
+    competitorCircles.forEach(circle => circle.setMap(null));
+    psoCircles = [];
+    competitorCircles = [];
 }
 
-// function getRegionCoordinates(division, district) {
-//     // Coordinates for districts in Sindh
-//     const coordinates = {
-//         'Karachi': {
-//             'Karachi Central': {
-//                 boundary: [
-//                     { lat: 24.8607, lng: 67.0011 },
-//                     { lat: 24.8707, lng: 67.0111 },
-//                     { lat: 24.8607, lng: 67.0211 },
-//                     { lat: 24.8507, lng: 67.0111 }
-//                 ]
-//             }
-//             // Add more districts as needed
-//         },
-//         // Add more divisions and districts similarly
-//     };
-
-//     return coordinates[division]?.[district] || { boundary: [], focusedAreas: [], nonFocusedAreas: [] };
-// }
-
-function getRegionCoordinates(division, district) {
-    // Coordinates for districts in Sindh
-    const coordinates = {
-        'Karachi': {
-            'Karachi Central': {
-                boundary: [
-                    { lat: 24.8607, lng: 67.0011 },
-                    { lat: 24.8707, lng: 67.0111 },
-                    { lat: 24.8607, lng: 67.0211 },
-                    { lat: 24.8507, lng: 67.0111 }
-                ]
-            },
-            'Karachi East': {
-                boundary: [
-                    { lat: 24.8678, lng: 67.0400 },
-                    { lat: 24.8778, lng: 67.0500 },
-                    { lat: 24.8678, lng: 67.0600 },
-                    { lat: 24.8578, lng: 67.0500 }
-                ]
-            },
-            'Karachi South': {
-                boundary: [
-                    { lat: 24.8128, lng: 67.0301 },
-                    { lat: 24.8228, lng: 67.0401 },
-                    { lat: 24.8128, lng: 67.0501 },
-                    { lat: 24.8028, lng: 67.0401 }
-                ]
-            },
-            'Karachi West': {
-                boundary: [
-                    { lat: 24.8550, lng: 67.0400 },
-                    { lat: 24.8650, lng: 67.0500 },
-                    { lat: 24.8550, lng: 67.0600 },
-                    { lat: 24.8450, lng: 67.0500 }
-                ]
-            },
-            'Korangi': {
-                boundary: [
-                    { lat: 24.8350, lng: 67.1100 },
-                    { lat: 24.8450, lng: 67.1200 },
-                    { lat: 24.8350, lng: 67.1300 },
-                    { lat: 24.8250, lng: 67.1200 }
-                ]
-            },
-            'Malir': {
-                boundary: [
-                    { lat: 24.8180, lng: 67.1450 },
-                    { lat: 24.8280, lng: 67.1550 },
-                    { lat: 24.8180, lng: 67.1650 },
-                    { lat: 24.8080, lng: 67.1550 }
-                ]
-            }
-        },
-        'Hyderabad': {
-            'Hyderabad District': {
-                boundary: [
-                    { lat: 25.3690, lng: 68.3570 },
-                    { lat: 25.3790, lng: 68.3670 },
-                    { lat: 25.3690, lng: 68.3770 },
-                    { lat: 25.3590, lng: 68.3670 }
-                ]
-            },
-            'Tando Allahyar': {
-                boundary: [
-                    { lat: 25.2480, lng: 68.2850 },
-                    { lat: 25.2580, lng: 68.2950 },
-                    { lat: 25.2480, lng: 68.3050 },
-                    { lat: 25.2380, lng: 68.2950 }
-                ]
-            },
-            'Tando Muhammad Khan': {
-                boundary: [
-                    { lat: 25.1580, lng: 68.2210 },
-                    { lat: 25.1680, lng: 68.2310 },
-                    { lat: 25.1580, lng: 68.2410 },
-                    { lat: 25.1480, lng: 68.2310 }
-                ]
-            }
-        },
-        'Sukkur': {
-            'Sukkur District': {
-                boundary: [
-                    { lat: 27.6950, lng: 68.8100 },
-                    { lat: 27.7050, lng: 68.8200 },
-                    { lat: 27.6950, lng: 68.8300 },
-                    { lat: 27.6850, lng: 68.8200 }
-                ]
-            },
-            'Ghotki': {
-                boundary: [
-                    { lat: 28.0480, lng: 69.0910 },
-                    { lat: 28.0580, lng: 69.1010 },
-                    { lat: 28.0480, lng: 69.1110 },
-                    { lat: 28.0380, lng: 69.1010 }
-                ]
-            },
-            'Kashmore': {
-                boundary: [
-                    { lat: 27.9140, lng: 69.4740 },
-                    { lat: 27.9240, lng: 69.4840 },
-                    { lat: 27.9140, lng: 69.4940 },
-                    { lat: 27.9040, lng: 69.4840 }
-                ]
-            },
-            'Khairpur': {
-                boundary: [
-                    { lat: 27.4990, lng: 69.1510 },
-                    { lat: 27.5090, lng: 69.1610 },
-                    { lat: 27.4990, lng: 69.1710 },
-                    { lat: 27.4890, lng: 69.1610 }
-                ]
-            }
-        },
-        'Larkana': {
-            'Larkana District': {
-                boundary: [
-                    { lat: 27.5560, lng: 68.2150 },
-                    { lat: 27.5660, lng: 68.2250 },
-                    { lat: 27.5560, lng: 68.2350 },
-                    { lat: 27.5460, lng: 68.2250 }
-                ]
-            },
-            'Kambar': {
-                boundary: [
-                    { lat: 27.6000, lng: 68.2750 },
-                    { lat: 27.6100, lng: 68.2850 },
-                    { lat: 27.6000, lng: 68.2950 },
-                    { lat: 27.5900, lng: 68.2850 }
-                ]
-            },
-            'Shahdadkot': {
-                boundary: [
-                    { lat: 27.5650, lng: 68.2400 },
-                    { lat: 27.5750, lng: 68.2500 },
-                    { lat: 27.5650, lng: 68.2600 },
-                    { lat: 27.5550, lng: 68.2500 }
-                ]
-            }
-        },
-        'Mirpurkhas': {
-            'Mirpurkhas District': {
-                boundary: [
-                    { lat: 25.3850, lng: 68.1630 },
-                    { lat: 25.3950, lng: 68.1730 },
-                    { lat: 25.3850, lng: 68.1830 },
-                    { lat: 25.3750, lng: 68.1730 }
-                ]
-            },
-            'Umerkot': {
-                boundary: [
-                    { lat: 25.3500, lng: 69.1770 },
-                    { lat: 25.3600, lng: 69.1870 },
-                    { lat: 25.3500, lng: 69.1970 },
-                    { lat: 25.3400, lng: 69.1870 }
-                ]
-            },
-            'Sanghar': {
-                boundary: [
-                    { lat: 25.2500, lng: 68.9700 },
-                    { lat: 25.2600, lng: 68.9800 },
-                    { lat: 25.2500, lng: 68.9900 },
-                    { lat: 25.2400, lng: 68.9800 }
-                ]
-            }
-        },
-        'Qambar Shahdadkot': {
-            'Qambar': {
-                boundary: [
-                    { lat: 27.5580, lng: 68.5150 },
-                    { lat: 27.5680, lng: 68.5250 },
-                    { lat: 27.5580, lng: 68.5350 },
-                    { lat: 27.5480, lng: 68.5250 }
-                ]
-            },
-            'Shahdadkot': {
-                boundary: [
-                    { lat: 27.5450, lng: 68.4900 },
-                    { lat: 27.5550, lng: 68.5000 },
-                    { lat: 27.5450, lng: 68.5100 },
-                    { lat: 27.5350, lng: 68.5000 }
-                ]
-            }
-        },
-        'Kambar': {
-            'Kambar District': {
-                boundary: [
-                    { lat: 27.5730, lng: 68.5400 },
-                    { lat: 27.5830, lng: 68.5500 },
-                    { lat: 27.5730, lng: 68.5600 },
-                    { lat: 27.5630, lng: 68.5500 }
-                ]
-            }
-        },
-        'Thatta': {
-            'Thatta District': {
-                boundary: [
-                    { lat: 24.7400, lng: 67.6100 },
-                    { lat: 24.7500, lng: 67.6200 },
-                    { lat: 24.7400, lng: 67.6300 },
-                    { lat: 24.7300, lng: 67.6200 }
-                ]
-            }
-        }
-    };
-
-    return coordinates[division]?.[district] || { boundary: [], focusedAreas: [], nonFocusedAreas: [] };
+function clearFocusedAreas() {
+    focusedAreas.forEach(area => area.setMap(null));
+    focusedAreas = [];
 }
-
-
-
-
-function highlightPSOStations(boundary) {
-    // Create a PlacesService instance
-    const service = new google.maps.places.PlacesService(map);
-
-    // Define the search request
-    const bounds = new google.maps.LatLngBounds();
-    boundary.forEach(coord => bounds.extend(new google.maps.LatLng(coord.lat, coord.lng)));
-
-    // Define search areas using the bounds
-    const request = {
-        bounds: bounds, // Use bounds for searching within a region
-        keyword: 'PSO',
-        type: ['gas_station'] // Ensure we're only searching for gas stations
-    };
-
-    // Perform the search
-    service.nearbySearch(request, (results, status) => {
-        if (status === google.maps.places.PlacesServiceStatus.OK) {
-            results.forEach(place => {
-                const placeLoc = place.geometry.location;
-
-                // Check if the place is within the polygon
-                if (google.maps.geometry.poly.containsLocation(placeLoc, new google.maps.Polygon({ paths: boundary }))) {
-                    const marker = new google.maps.Marker({
-                        position: placeLoc,
-                        map: map,
-                        title: place.name
-                    });
-
-                    psoMarkers.push(marker);
-
-                    // Add a small blue circle around the PSO station
-                    new google.maps.Circle({
-                        strokeColor: "#0000FF",
-                        strokeOpacity: 0.8,
-                        strokeWeight: 2,
-                        fillColor: "#0000FF",
-                        fillOpacity: 0.35,
-                        map,
-                        center: placeLoc,
-                        radius: 100, // Small circle radius
-                    }).addListener('click', () => {
-                        const infowindow = new google.maps.InfoWindow({
-                            content: `PSO Station: ${place.name}`,
-                            position: placeLoc
-                        });
-                        infowindow.open(map);
-                    });
-                }
-            });
-        } else {
-            console.log('Places search failed due to: ' + status);
-        }
-    });
-}
-
